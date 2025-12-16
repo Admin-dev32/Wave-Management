@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ApiError, assertEnv, waveError } from './errors';
+import { ApiError, waveError } from './errors';
 
 const WAVE_ENDPOINT = 'https://gql.waveapps.com/graphql/public';
 
@@ -27,8 +27,16 @@ export interface AccountSummary {
   subtype?: string | null;
 }
 
-export async function waveGraphQLFetch<T>(query: string, variables: Record<string, unknown> = {}, requestId?: string): Promise<T> {
-  const token = assertEnv('WAVE_ACCESS_TOKEN');
+export async function waveGraphQLFetch<T>(
+  query: string,
+  variables?: Record<string, unknown>,
+  requestId?: string,
+): Promise<T> {
+  const token = process.env.WAVE_ACCESS_TOKEN;
+  if (!token) {
+    throw new ApiError(500, 'Missing WAVE_ACCESS_TOKEN', undefined, 'CONFIG_ERROR');
+  }
+
   const res = await fetch(WAVE_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -36,12 +44,18 @@ export async function waveGraphQLFetch<T>(query: string, variables: Record<strin
       'Content-Type': 'application/json',
       'X-Request-ID': requestId ?? randomUUID(),
     },
-    body: JSON.stringify({ query, variables }),
+    body: JSON.stringify({ query, variables: variables ?? {} }),
     cache: 'no-store',
   });
 
   if (!res.ok) {
-    throw waveError(res.status, `Wave request failed: ${res.statusText}`);
+    const text = await res.text().catch(() => '');
+    throw new ApiError(
+      502,
+      `Wave request failed: ${res.status} ${res.statusText}`,
+      { details: text.slice(0, 2000) },
+      'WAVE_ERROR',
+    );
   }
 
   const json = (await res.json()) as WaveGraphQLResponse<T>;
@@ -56,14 +70,16 @@ export async function waveGraphQLFetch<T>(query: string, variables: Record<strin
 
 export async function fetchBusinesses(requestId?: string): Promise<BusinessSummary[]> {
   const query = `
-    query Businesses {
-      businesses(page: 1, pageSize: 50) {
-        nodes { id name isActive }
+    query ListBusinesses {
+      businesses {
+        edges {
+          node { id name isActive }
+        }
       }
     }
   `;
-  const data = await waveGraphQLFetch<{ businesses: { nodes: BusinessSummary[] } }>(query, {}, requestId);
-  return data.businesses.nodes;
+  const data = await waveGraphQLFetch<{ businesses: { edges: { node: BusinessSummary }[] } }>(query, {}, requestId);
+  return data.businesses.edges.map((edge) => edge.node);
 }
 
 export async function fetchAccounts(
