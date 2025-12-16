@@ -4,7 +4,11 @@
  */
 
 const baseUrl = process.env.BASE_URL ?? 'http://localhost:3000';
-const secret = process.env.INTERNAL_API_SECRET;
+const secret = process.env.INTERNAL_API_SECRET ?? '';
+if (!secret) {
+  throw new Error('Missing INTERNAL_API_SECRET in environment (required for smoke test).');
+}
+
 
 if (!secret) {
   console.error('Missing INTERNAL_API_SECRET environment variable');
