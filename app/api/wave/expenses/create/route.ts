@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { ensureInternalSecret, toErrorResponse, ApiError } from '../../../../../lib/errors';
 import { resolveBusiness } from '../../../../../lib/resolveBusiness';
