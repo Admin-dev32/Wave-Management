@@ -1,0 +1,101 @@
+{
+  "info": {
+    "name": "Wave Expense AI Backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://your-vercel-url" },
+    { "key": "internal_secret", "value": "changeme" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{base_url}}/api/health" }
+    },
+    {
+      "name": "List businesses",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "x-internal-secret", "value": "{{internal_secret}}" }],
+        "url": "{{base_url}}/api/wave/businesses"
+      }
+    },
+    {
+      "name": "List accounts (EXPENSE)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "x-internal-secret", "value": "{{internal_secret}}" }],
+        "url": "{{base_url}}/api/wave/accounts?types=EXPENSE"
+      }
+    },
+    {
+      "name": "Suggest expense account",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "x-internal-secret", "value": "{{internal_secret}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 20.5,\n  \"text\": \"Costco cups\"\n}"
+        },
+        "url": "{{base_url}}/api/wave/expenses/suggest"
+      }
+    },
+    {
+      "name": "Create expense (auto)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "x-internal-secret", "value": "{{internal_secret}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"date\": \"2024-06-01\",\n  \"amount\": 15.75,\n  \"description\": \"Snacks\"\n}"
+        },
+        "url": "{{base_url}}/api/wave/expenses/create"
+      }
+    },
+    {
+      "name": "Create expense (manual accounts)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "x-internal-secret", "value": "{{internal_secret}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"date\": \"2024-06-01\",\n  \"amount\": 15.75,\n  \"description\": \"Snacks\",\n  \"anchorAccountId\": \"bank-id\",\n  \"expenseAccountId\": \"expense-id\"\n}"
+        },
+        "url": "{{base_url}}/api/wave/expenses/create"
+      }
+    },
+    {
+      "name": "Find or create customer",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "x-internal-secret", "value": "{{internal_secret}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"Test Customer\"\n}" },
+        "url": "{{base_url}}/api/wave/customers/find-or-create"
+      }
+    },
+    {
+      "name": "Find or create product",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "x-internal-secret", "value": "{{internal_secret}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"Service\"\n}" },
+        "url": "{{base_url}}/api/wave/products/find-or-create"
+      }
+    }
+  ]
+}
