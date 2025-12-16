@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { ApiError, assertEnv, waveError } from './errors';
 
 const WAVE_ENDPOINT = 'https://gql.waveapps.com/graphql/public';
@@ -34,7 +34,7 @@ export async function waveGraphQLFetch<T>(query: string, variables: Record<strin
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      'X-Request-ID': requestId ?? uuidv4(),
+      'X-Request-ID': requestId ?? randomUUID(),
     },
     body: JSON.stringify({ query, variables }),
     cache: 'no-store',
@@ -196,7 +196,7 @@ export interface ExpenseInput {
 }
 
 export async function createExpense(input: ExpenseInput, requestId?: string) {
-  const externalId = input.externalId || uuidv4();
+  const externalId = input.externalId || randomUUID();
   const mutation = `
     mutation MoneyTransactionCreate($input: MoneyTransactionCreateInput!) {
       moneyTransactionCreate(input: $input) {

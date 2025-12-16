@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ensureInternalSecret, toErrorResponse, ApiError } from '../../../../../lib/errors';
 import { resolveBusiness } from '../../../../../lib/resolveBusiness';
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
         anchorAccountId,
         expenseAccountId,
         vendor: body.vendor,
-        externalId: body.externalId ?? uuidv4(),
+        externalId: body.externalId ?? randomUUID(),
       },
       requestId,
     );
