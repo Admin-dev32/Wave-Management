@@ -1,12 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { ApiError, waveError } from './errors';
+import { getCache, setCache } from './cache';
 
 const WAVE_ENDPOINT = 'https://gql.waveapps.com/graphql/public';
+
+const SCHEMA_CACHE_KEY = 'wave:schema';
+const SCHEMA_TTL = 30 * 60 * 1000;
+
+interface GraphQLLocation {
+  line: number;
+  column: number;
+}
 
 interface GraphQLError {
   message: string;
   path?: (string | number)[];
   extensions?: Record<string, unknown>;
+  locations?: GraphQLLocation[];
 }
 
 interface WaveGraphQLResponse<T> {
@@ -17,7 +27,7 @@ interface WaveGraphQLResponse<T> {
 export interface BusinessSummary {
   id: string;
   name: string;
-  isActive: boolean;
+  isPersonal: boolean;
 }
 
 export interface AccountSummary {
@@ -60,6 +70,12 @@ export async function waveGraphQLFetch<T>(
 
   const json = (await res.json()) as WaveGraphQLResponse<T>;
   if (json.errors && json.errors.length > 0) {
+    const formatted = json.errors.map((error) => ({
+      message: error.message,
+      path: error.path,
+      locations: error.locations,
+    }));
+    console.error('Wave GraphQL errors', { requestId, errors: formatted });
     throw waveError(502, 'Wave GraphQL error', { errors: json.errors });
   }
   if (!json.data) {
@@ -68,12 +84,91 @@ export async function waveGraphQLFetch<T>(
   return json.data;
 }
 
+const INTROSPECTION_QUERY = `
+  query IntrospectionQuery {
+    __schema {
+      queryType { name }
+      mutationType { name }
+      types {
+        ...FullType
+      }
+      directives {
+        name
+        description
+        locations
+        args {
+          ...InputValue
+        }
+      }
+    }
+  }
+
+  fragment FullType on __Type {
+    kind
+    name
+    description
+    fields(includeDeprecated: true) {
+      name
+      description
+      args { ...InputValue }
+      type { ...TypeRef }
+      isDeprecated
+      deprecationReason
+    }
+    inputFields { ...InputValue }
+    interfaces { ...TypeRef }
+    enumValues(includeDeprecated: true) {
+      name
+      description
+      isDeprecated
+      deprecationReason
+    }
+    possibleTypes { ...TypeRef }
+  }
+
+  fragment InputValue on __InputValue {
+    name
+    description
+    type { ...TypeRef }
+    defaultValue
+  }
+
+  fragment TypeRef on __Type {
+    kind
+    name
+    ofType {
+      kind
+      name
+      ofType {
+        kind
+        name
+        ofType {
+          kind
+          name
+          ofType {
+            kind
+            name
+          }
+        }
+      }
+    }
+  }
+`;
+
+export async function fetchWaveSchema(requestId?: string) {
+  const cached = getCache<unknown>(SCHEMA_CACHE_KEY);
+  if (cached) return cached;
+  const schema = await waveGraphQLFetch<unknown>(INTROSPECTION_QUERY, {}, requestId);
+  setCache(SCHEMA_CACHE_KEY, schema, SCHEMA_TTL);
+  return schema;
+}
+
 export async function fetchBusinesses(requestId?: string): Promise<BusinessSummary[]> {
   const query = `
     query ListBusinesses {
-      businesses {
+      businesses(page: 1, pageSize: 10) {
         edges {
-          node { id name isActive }
+          node { id name isPersonal }
         }
       }
     }
@@ -85,28 +180,54 @@ export async function fetchBusinesses(requestId?: string): Promise<BusinessSumma
 export async function fetchAccounts(
   businessId: string,
   types?: string[],
-  queryText?: string,
   requestId?: string,
 ): Promise<AccountSummary[]> {
   const query = `
-    query Accounts($businessId: ID!, $types: [AccountType!], $query: String) {
+    query Accounts($businessId: ID!, $types: [AccountTypeValue!]) {
       business(id: $businessId) {
         id
-        accounts(page: 1, pageSize: 200, types: $types, query: $query) {
-          nodes { id name type subtype }
+        accounts(page: 1, pageSize: 200, types: $types) {
+          edges {
+            node {
+              id
+              name
+              type { name value }
+              subtype { name value }
+            }
+          }
         }
       }
     }
   `;
-  const data = await waveGraphQLFetch<{ business: { accounts: { nodes: AccountSummary[] } | null } | null }>(
+  const data = await waveGraphQLFetch<{
+    business: {
+      accounts:
+        | {
+            edges: {
+              node: {
+                id: string;
+                name: string;
+                type: { name: string; value: string };
+                subtype?: { name: string; value: string } | null;
+              };
+            }[];
+          }
+        | null;
+    } | null;
+  }>(
     query,
-    { businessId, types, query: queryText },
+    { businessId, types },
     requestId,
   );
   if (!data.business || !data.business.accounts) {
     throw new ApiError(404, 'Business not found or accounts unavailable');
   }
-  return data.business.accounts.nodes;
+  return data.business.accounts.edges.map((edge) => ({
+    id: edge.node.id,
+    name: edge.node.name,
+    type: edge.node.type.value,
+    subtype: edge.node.subtype?.value ?? null,
+  }));
 }
 
 export interface CustomerInput {
@@ -119,21 +240,22 @@ export interface CustomerInput {
 
 export async function findCustomers(businessId: string, queryText: string, requestId?: string) {
   const query = `
-    query Customers($businessId: ID!, $query: String) {
+    query Customers($businessId: ID!) {
       business(id: $businessId) {
         id
-        customers(page: 1, pageSize: 50, query: $query) {
-          nodes { id name email phone }
+        customers(page: 1, pageSize: 50, sort: [NAME_ASC]) {
+          edges { node { id name email phone } }
         }
       }
     }
   `;
-  const data = await waveGraphQLFetch<{ business: { customers: { nodes: { id: string; name: string; email?: string }[] } | null } | null }>(
-    query,
-    { businessId, query: queryText },
-    requestId,
-  );
-  return data.business?.customers?.nodes ?? [];
+  const data = await waveGraphQLFetch<{
+    business: { customers: { edges: { node: { id: string; name: string; email?: string; phone?: string } }[] } | null } | null;
+  }>(query, { businessId }, requestId);
+  const customers = data.business?.customers?.edges.map((edge) => edge.node) ?? [];
+  if (!queryText) return customers;
+  const q = queryText.toLowerCase();
+  return customers.filter((c) => c.name.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q));
 }
 
 export async function createCustomer(input: CustomerInput, requestId?: string) {
@@ -164,21 +286,21 @@ export interface ProductInput {
 
 export async function findProducts(businessId: string, name: string, requestId?: string) {
   const query = `
-    query Products($businessId: ID!, $query: String) {
+    query Products($businessId: ID!) {
       business(id: $businessId) {
         id
-        products(page: 1, pageSize: 50, query: $query) {
-          nodes { id name unitPrice }
+        products(page: 1, pageSize: 50) {
+          edges { node { id name unitPrice description } }
         }
       }
     }
   `;
-  const data = await waveGraphQLFetch<{ business: { products: { nodes: { id: string; name: string; unitPrice?: number }[] } | null } | null }>(
-    query,
-    { businessId, query: name },
-    requestId,
-  );
-  return data.business?.products?.nodes ?? [];
+  const data = await waveGraphQLFetch<{
+    business: { products: { edges: { node: { id: string; name: string; unitPrice?: number; description?: string } }[] } | null } | null;
+  }>(query, { businessId }, requestId);
+  const products = data.business?.products?.edges.map((edge) => edge.node) ?? [];
+  const q = name.toLowerCase();
+  return products.filter((p) => p.name.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q));
 }
 
 export async function createProduct(input: ProductInput, requestId?: string) {
@@ -218,7 +340,7 @@ export async function createExpense(input: ExpenseInput, requestId?: string) {
       moneyTransactionCreate(input: $input) {
         didSucceed
         inputErrors { message code path }
-        moneyTransaction { id }
+        transaction { id }
       }
     }
   `;
@@ -227,7 +349,6 @@ export async function createExpense(input: ExpenseInput, requestId?: string) {
     externalId,
     date: input.date,
     description: input.description,
-    notes: input.notes ?? undefined,
     anchor: {
       accountId: input.anchorAccountId,
       amount: input.amount,
@@ -240,7 +361,6 @@ export async function createExpense(input: ExpenseInput, requestId?: string) {
         balance: 'INCREASE',
       },
     ],
-    contacts: input.vendor ? [{ type: 'VENDOR', name: input.vendor }] : undefined,
   };
 
   const data = await waveGraphQLFetch<{ moneyTransactionCreate: any }>(mutation, { input: payload }, requestId);
@@ -248,5 +368,5 @@ export async function createExpense(input: ExpenseInput, requestId?: string) {
   if (!result.didSucceed) {
     throw new ApiError(400, 'Wave input errors', { inputErrors: result.inputErrors });
   }
-  return { transactionId: result.moneyTransaction.id, externalId };
+  return { transactionId: result.transaction.id, externalId };
 }

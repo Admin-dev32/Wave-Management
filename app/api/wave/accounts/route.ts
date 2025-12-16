@@ -11,7 +11,6 @@ const querySchema = z.object({
   businessId: z.string().optional(),
   businessName: z.string().optional(),
   types: z.string().optional(),
-  query: z.string().optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -21,10 +20,10 @@ export async function GET(req: NextRequest) {
     const requestId = req.headers.get('x-request-id') ?? undefined;
     const resolved = await resolveBusiness({ businessId: parsed.businessId, businessName: parsed.businessName }, requestId);
     const types = parsed.types?.split(',').filter(Boolean);
-    const cacheKey = `accounts:${resolved.business.id}:${types?.join(',') ?? 'all'}:${parsed.query ?? ''}`;
+    const cacheKey = `accounts:${resolved.business.id}:${types?.join(',') ?? 'all'}`;
     let accounts = getCache<Awaited<ReturnType<typeof fetchAccounts>>>(cacheKey);
     if (!accounts) {
-      accounts = await fetchAccounts(resolved.business.id, types, parsed.query, requestId);
+      accounts = await fetchAccounts(resolved.business.id, types, requestId);
       setCache(cacheKey, accounts, TTL);
     }
     return NextResponse.json({ ok: true, business: resolved.business, accounts });

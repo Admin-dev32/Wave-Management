@@ -31,9 +31,8 @@ export async function resolveBusiness(
     }
   }
 
-  const active = businesses.filter((b) => b.isActive);
-  if (active.length === 1) {
-    return { business: active[0], multiple: null };
+  if (businesses.length === 1) {
+    return { business: businesses[0], multiple: null };
   }
-  throw new ApiError(300, 'Multiple businesses available, please choose', { options: active });
+  throw new ApiError(300, 'Multiple businesses available, please choose', { options: businesses });
 }

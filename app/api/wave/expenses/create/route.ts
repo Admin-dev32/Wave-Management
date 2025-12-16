@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const requestId = req.headers.get('x-request-id') ?? undefined;
     const { business } = await resolveBusiness({ businessId: body.businessId, businessName: body.businessName }, requestId);
 
-    const accounts = await fetchAccounts(business.id, undefined, undefined, requestId);
+    const accounts = await fetchAccounts(business.id, undefined, requestId);
     let anchorAccountId = body.anchorAccountId;
     if (!anchorAccountId) {
       const anchorSuggestions = suggestAnchor(accounts);
