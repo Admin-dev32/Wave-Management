@@ -1,12 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { ApiError, waveError } from './errors';
+import { getCache, setCache } from './cache';
 
 const WAVE_ENDPOINT = 'https://gql.waveapps.com/graphql/public';
+
+const SCHEMA_CACHE_KEY = 'wave:schema';
+const SCHEMA_TTL = 30 * 60 * 1000;
+
+interface GraphQLLocation {
+  line: number;
+  column: number;
+}
 
 interface GraphQLError {
   message: string;
   path?: (string | number)[];
   extensions?: Record<string, unknown>;
+  locations?: GraphQLLocation[];
 }
 
 interface WaveGraphQLResponse<T> {
@@ -60,12 +70,97 @@ export async function waveGraphQLFetch<T>(
 
   const json = (await res.json()) as WaveGraphQLResponse<T>;
   if (json.errors && json.errors.length > 0) {
+    const formatted = json.errors.map((error) => ({
+      message: error.message,
+      path: error.path,
+      locations: error.locations,
+    }));
+    console.error('Wave GraphQL errors', { requestId, errors: formatted });
     throw waveError(502, 'Wave GraphQL error', { errors: json.errors });
   }
   if (!json.data) {
     throw waveError(502, 'Wave response missing data');
   }
   return json.data;
+}
+
+const INTROSPECTION_QUERY = `
+  query IntrospectionQuery {
+    __schema {
+      queryType { name }
+      mutationType { name }
+      types {
+        ...FullType
+      }
+      directives {
+        name
+        description
+        locations
+        args {
+          ...InputValue
+        }
+      }
+    }
+  }
+
+  fragment FullType on __Type {
+    kind
+    name
+    description
+    fields(includeDeprecated: true) {
+      name
+      description
+      args { ...InputValue }
+      type { ...TypeRef }
+      isDeprecated
+      deprecationReason
+    }
+    inputFields { ...InputValue }
+    interfaces { ...TypeRef }
+    enumValues(includeDeprecated: true) {
+      name
+      description
+      isDeprecated
+      deprecationReason
+    }
+    possibleTypes { ...TypeRef }
+  }
+
+  fragment InputValue on __InputValue {
+    name
+    description
+    type { ...TypeRef }
+    defaultValue
+  }
+
+  fragment TypeRef on __Type {
+    kind
+    name
+    ofType {
+      kind
+      name
+      ofType {
+        kind
+        name
+        ofType {
+          kind
+          name
+          ofType {
+            kind
+            name
+          }
+        }
+      }
+    }
+  }
+`;
+
+export async function fetchWaveSchema(requestId?: string) {
+  const cached = getCache<unknown>(SCHEMA_CACHE_KEY);
+  if (cached) return cached;
+  const schema = await waveGraphQLFetch<unknown>(INTROSPECTION_QUERY, {}, requestId);
+  setCache(SCHEMA_CACHE_KEY, schema, SCHEMA_TTL);
+  return schema;
 }
 
 export async function fetchBusinesses(requestId?: string): Promise<BusinessSummary[]> {
@@ -85,14 +180,13 @@ export async function fetchBusinesses(requestId?: string): Promise<BusinessSumma
 export async function fetchAccounts(
   businessId: string,
   types?: string[],
-  queryText?: string,
   requestId?: string,
 ): Promise<AccountSummary[]> {
   const query = `
-    query Accounts($businessId: ID!, $types: [AccountType!], $query: String) {
+    query Accounts($businessId: ID!, $types: [AccountTypeValue!]) {
       business(id: $businessId) {
         id
-        accounts(page: 1, pageSize: 200, types: $types, query: $query) {
+        accounts(page: 1, pageSize: 200, types: $types) {
           edges {
             node {
               id
@@ -122,7 +216,7 @@ export async function fetchAccounts(
     } | null;
   }>(
     query,
-    { businessId, types, query: queryText },
+    { businessId, types },
     requestId,
   );
   if (!data.business || !data.business.accounts) {

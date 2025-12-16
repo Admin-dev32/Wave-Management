@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     const cacheKey = `accounts:${business.id}:EXPENSE:`;
     let accounts = getCache<Awaited<ReturnType<typeof fetchAccounts>>>(cacheKey);
     if (!accounts) {
-      accounts = await fetchAccounts(business.id, ['EXPENSE'], undefined, requestId);
+      accounts = await fetchAccounts(business.id, ['EXPENSE'], requestId);
       setCache(cacheKey, accounts, TTL);
     }
     const suggestions = rankExpenseAccounts(accounts, {
