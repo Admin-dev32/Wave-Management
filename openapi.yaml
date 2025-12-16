@@ -1,0 +1,363 @@
+openapi: 3.1.0
+info:
+  title: Wave Expense AI Backend
+  version: 0.1.0
+servers:
+  - url: https://your-vercel-url
+components:
+  securitySchemes:
+    internalSecret:
+      type: apiKey
+      in: header
+      name: x-internal-secret
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: Unauthorized
+        code:
+          type: string
+          description: Optional error code. `WAVE_ERROR` is used when Wave returns errors.
+        details:
+          type: object
+          additionalProperties: true
+          description: Extra context such as Wave inputErrors, GraphQL errors, or selection options.
+      required: [ok, message]
+    BusinessSummary:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        isActive: { type: boolean }
+      required: [id, name, isActive]
+    AccountSuggestion:
+      type: object
+      properties:
+        accountId: { type: string }
+        name: { type: string }
+        type: { type: string }
+        score: { type: number }
+        reason: { type: string }
+      required: [accountId, name, type, score]
+    ExpenseSuggestRequest:
+      type: object
+      properties:
+        businessId: { type: string }
+        businessName: { type: string }
+        text: { type: string }
+        amount: { type: number, description: Positive amount for the expense }
+        vendor: { type: string }
+        categoryHint: { type: string }
+        topK: { type: integer, default: 5 }
+      required: [amount]
+    ExpenseSuggestResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        business:
+          $ref: '#/components/schemas/BusinessSummary'
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountSuggestion'
+      required: [ok, business, suggestions]
+    ExpenseCreateRequest:
+      type: object
+      properties:
+        businessId: { type: string }
+        businessName: { type: string }
+        date: { type: string, description: YYYY-MM-DD }
+        amount: { type: number, description: Positive amount }
+        description: { type: string }
+        vendor: { type: string }
+        notes: { type: string }
+        anchorAccountId: { type: string }
+        expenseAccountId: { type: string }
+        externalId: { type: string }
+        categoryHint: { type: string, description: Optional hint used when auto-suggesting expense accounts }
+        text: { type: string, description: Optional free text used for matching expense accounts }
+      required: [date, amount, description]
+    ExpenseCreateResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        transactionId: { type: string }
+        used:
+          type: object
+          properties:
+            businessId: { type: string }
+            anchorAccountId: { type: string }
+            expenseAccountId: { type: string }
+          required: [businessId, anchorAccountId, expenseAccountId]
+        wave:
+          type: object
+          properties:
+            didSucceed: { type: boolean }
+            inputErrors:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+      required: [ok, transactionId, used, wave]
+security:
+  - internalSecret: []
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: ok
+  /api/wave/businesses:
+    get:
+      summary: List businesses
+      responses:
+        '200':
+          description: Businesses
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  businesses:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BusinessSummary'
+                required: [ok, businesses]
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/wave/accounts:
+    get:
+      summary: List accounts
+      parameters:
+        - in: query
+          name: businessId
+          schema: { type: string }
+        - in: query
+          name: businessName
+          schema: { type: string }
+        - in: query
+          name: types
+          schema: { type: string }
+        - in: query
+          name: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  business:
+                    $ref: '#/components/schemas/BusinessSummary'
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        type: { type: string }
+                        subtype: { type: string, nullable: true }
+                      required: [id, name, type]
+                required: [ok, business, accounts]
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/wave/expenses/suggest:
+    post:
+      summary: Suggest expense accounts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpenseSuggestRequest'
+            examples:
+              gasolina:
+                summary: "Compré gasolina $55"
+                value:
+                  businessName: "Acme LLC"
+                  amount: 55
+                  text: "gasolina"
+                  vendor: "Shell"
+                  categoryHint: "gasolina"
+              costco:
+                summary: "Costco $128 toppings"
+                value:
+                  businessName: "Acme LLC"
+                  amount: 128
+                  text: "Costco toppings"
+                  vendor: "Costco"
+                  categoryHint: "alimentos"
+              homeDepot:
+                summary: "Home Depot $74 tools"
+                value:
+                  businessName: "Acme LLC"
+                  amount: 74
+                  text: "Home Depot tools"
+                  vendor: "Home Depot"
+                  categoryHint: "herramientas"
+      responses:
+        '200':
+          description: Suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseSuggestResponse'
+        '300':
+          description: Ambiguous selection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/wave/expenses/create:
+    post:
+      summary: Create expense
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpenseCreateRequest'
+            examples:
+              gasolina:
+                summary: "Compré gasolina $55"
+                value:
+                  businessName: "Acme LLC"
+                  date: "2024-05-20"
+                  amount: 55
+                  description: "Gasolina"
+                  vendor: "Shell"
+                  categoryHint: "gasolina"
+              costco:
+                summary: "Costco $128 toppings"
+                value:
+                  businessName: "Acme LLC"
+                  date: "2024-05-22"
+                  amount: 128
+                  description: "Toppings para fiesta"
+                  vendor: "Costco"
+                  categoryHint: "alimentos"
+              homeDepot:
+                summary: "Home Depot $74 tools"
+                value:
+                  businessName: "Acme LLC"
+                  date: "2024-05-23"
+                  amount: 74
+                  description: "Herramientas básicas"
+                  vendor: "Home Depot"
+                  categoryHint: "herramientas"
+      responses:
+        '200':
+          description: Expense created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseCreateResponse'
+        '300':
+          description: Ambiguous selection required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: Validation or Wave input errors
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Wave GraphQL error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/wave/customers/find-or-create:
+    post:
+      summary: Find or create customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                businessId: { type: string }
+                businessName: { type: string }
+                name: { type: string }
+                email: { type: string }
+                phone: { type: string }
+                currency: { type: string }
+              required: [name]
+      responses:
+        '200':
+          description: Customer result
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/wave/products/find-or-create:
+    post:
+      summary: Find or create product or service
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                businessId: { type: string }
+                businessName: { type: string }
+                name: { type: string }
+                unitPrice: { type: number }
+                description: { type: string }
+                incomeAccountId: { type: string }
+              required: [name]
+      responses:
+        '200':
+          description: Product result
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
